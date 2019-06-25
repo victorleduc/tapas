@@ -1,23 +1,40 @@
 const Rx = require('rxjs');
+const RxOps = require('rxjs/operators');
 
 const { getRace } = require('./race');
 const race = getRace();
 
 const carName = `Lightning McQueen`;
 
-const getCarSpeed = (race, car) => {
-    return new Rx.Observable(observer => {
-        let lastTime = 0;
-        let lastLocation = 0;
-        race.on('data', ({ time, carName, xLocation }) => {
-            if (car === carName && time - lastTime > 200) {
-                const speed = 1000 * ((xLocation - lastLocation) / (time - lastTime));
-                observer.next(speed.toFixed(2));
-                lastTime = time;
-                lastLocation = xLocation;
-            }
-        });
-    });
+const getCarSpeed = (race, carName) => {
+
+    const completeWindow$ = new Rx.Subject();
+    let foundLast = false;
+    let startTime = 0;
+
+    return Rx.fromEvent(race, 'data', (car) => car)
+        .pipe(
+            RxOps.filter((car) => car.carName === carName),
+            RxOps.tap((car) => {
+                if (foundLast) {
+                    completeWindow$.next(true);
+                    startTime = car.time;
+                    foundLast = false;
+                } else if (car.time > startTime + 200) {
+                    foundLast = true;
+                }
+            }),
+            RxOps.bufferWhen(() => completeWindow$.pipe(RxOps.filter((a) => !!a))),
+            RxOps.map((windowData) => {
+                const firstData = windowData[0];
+                const lastData = windowData[windowData.length - 1];
+                const speed = 1000 * (
+                    (lastData.xLocation - firstData.xLocation) /
+                    (lastData.time - firstData.time)
+                );
+                return speed.toFixed(2);
+            })
+        );
 };
 
 const speed$ = getCarSpeed(race, carName);
